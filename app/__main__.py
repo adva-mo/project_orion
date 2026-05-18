@@ -60,11 +60,11 @@ def _print_verbose(details: list[ScanDetail], errors: dict[str, str]) -> None:
         fib = r.fibonacci
         price = r.current_price
         in_value_area = vp.val < price < vp.vah
-        ema_tag = "above EMA (+10)" if price > d.ema_20 else "below EMA (-15)"
+        ema_tag = "above EMA (+8)" if price > d.ema_20 else "below EMA (-15)"
         sep = "=" * 60
 
         print(sep)
-        print(f"  {r.ticker}  —  {r.setup_type}  (score: {r.score}/100)")
+        print(f"  {r.ticker}  —  {r.setup_type}  (score: {r.score:.2f})")
         print(sep)
 
         print(f"  Price      : {price:.2f}")
@@ -146,7 +146,7 @@ def _print_table(results: list[ScanResult], errors: dict[str, str]) -> None:
         print(
             f"{r.ticker:<{col_w[0]}}  "
             f"{r.setup_type:<{col_w[1]}}  "
-            f"{r.score:>{col_w[2]}}  "
+            f"{r.score:>{col_w[2]}.2f}  "
             f"{r.current_price:>{col_w[3]}.2f}  "
             f"{buy_zone_str:^{col_w[4]}}  "
             f"{stop_str:>{col_w[5]}}  "
