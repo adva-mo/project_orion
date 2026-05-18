@@ -13,6 +13,25 @@ _VOL_PROX = 0.5   # price vs volume level (POC / VAL / HVN)
 _FLOW_PROX = 0.3  # price vs VWAP
 _STRUCT_PROX = 0.3  # price vs swing low
 
+# Signal weights (tiered by predictive strength)
+_W_SWEEP      = 30   # tier 1: sweep-and-reclaim anywhere
+_W_POC        = 25   # tier 1: POC confluence
+_W_FIB618_MAX = 20   # tier 2: fib 61.8% proximity (linear, 0–20)
+_W_RR_MAX     = 20   # tier 2: R/R quality (linear, 0–20)
+_W_VAL        = 12   # tier 3
+_W_VOL_CONF   = 12   # tier 3: volume-confirmed VWAP reclaim
+_W_SWING_PROX = 10   # tier 3
+_W_HVN        = 8    # tier 3
+_W_VWAP       = 8    # tier 3
+_W_EMA_ABOVE  = 8    # tier 3
+_W_EMA_BELOW  = -15  # penalty
+_W_IN_VA      = -20  # penalty
+_W_ACCEPTED   = -20  # penalty
+_MAX_SCORE = (
+    _W_SWEEP + _W_POC + _W_FIB618_MAX + _W_RR_MAX
+    + _W_VAL + _W_VOL_CONF + _W_SWING_PROX + _W_HVN + _W_VWAP + _W_EMA_ABOVE
+)  # = 153
+
 
 def detect_setup(
     ticker: str,
@@ -116,68 +135,56 @@ def _score_setup(
     sweep_at_val: bool = False,
     price_above_ema: bool = True,
 ) -> float:
-    """
-    Unified scorer with three non-overlapping confluence categories.
+    """Returns a score in [0.0, 1.0] normalised against _MAX_SCORE."""
+    raw = 0.0
 
-    Category caps prevent the same level being credited twice:
-      Volume   (max 15): single best of POC / VAL / HVN
-      Structure (max 20): single best of fib 61.8% proximity OR swing-low proximity
-      Flow      (max 10): VWAP proximity
-
-    Sweep bonus is capped at 15 across both sweep signals to avoid inflation.
-    """
-    score = 0.0
-
-    # --- Volume category (max 15, single best) ---
-    vol_pts = 0.0
+    # --- Volume (best of POC / VAL / HVN) ---
     if abs(current_price - vp.poc) <= _VOL_PROX * atr:
-        vol_pts = 15.0
+        raw += _W_POC
     elif abs(current_price - vp.val) <= _VOL_PROX * atr:
-        vol_pts = 10.0
+        raw += _W_VAL
     else:
         for hvn in vp.hvn:
             if abs(current_price - hvn) <= _VOL_PROX * atr:
-                vol_pts = 8.0
+                raw += _W_HVN
                 break
-    score += vol_pts
 
-    # --- Structure category (max 20, single best of fib vs swing low) ---
+    # --- Structure (best of fib 61.8% proximity vs swing-low proximity) ---
     struct_pts = 0.0
     if fib_618 is not None:
         dist = abs(current_price - fib_618)
-        struct_pts = max(0.0, (1.0 - dist / atr) * 20.0)
+        struct_pts = max(0.0, (1.0 - dist / atr) * _W_FIB618_MAX)
     if vsl is not None and vsl.is_valid and vsl.price_near:
-        struct_pts = max(struct_pts, 15.0)
-    score += struct_pts
+        struct_pts = max(struct_pts, float(_W_SWING_PROX))
+    raw += struct_pts
 
-    # --- Flow category (max 10) ---
+    # --- Flow ---
     if abs(current_price - vwap) <= _FLOW_PROX * atr:
-        score += 10.0
+        raw += _W_VWAP
 
-    # --- R/R score (max 25, weighted 70/30 for scoring only) ---
+    # --- R/R (linear 0→20 over range 2×→4×) ---
     weighted_rr = 0.7 * rr1 + 0.3 * rr2
-    score += min(25.0, max(0.0, (weighted_rr - 2.0) / (4.0 - 2.0) * 25.0))
+    raw += min(_W_RR_MAX, max(0.0, (weighted_rr - 2.0) / (4.0 - 2.0) * _W_RR_MAX))
 
-    # --- Bonuses ---
+    # --- Volume confirmation (VWAP reclaim) ---
     if volume_confirmed:
-        score += 15.0
+        raw += _W_VOL_CONF
 
-    # Sweep bonus capped at 15 across both sweep signals
-    sweep_pts = (10.0 if sweep_at_val else 0.0) + (
-        10.0 if (vsl is not None and vsl.is_valid and vsl.sweep_detected) else 0.0
-    )
-    score += min(15.0, sweep_pts)
+    # --- Sweep-and-reclaim (capped at _W_SWEEP even when both locations fire) ---
+    any_sweep = sweep_at_val or (vsl is not None and vsl.is_valid and vsl.sweep_detected)
+    if any_sweep:
+        raw += _W_SWEEP
 
     # --- Trend filter ---
-    score += 10.0 if price_above_ema else -15.0
+    raw += _W_EMA_ABOVE if price_above_ema else _W_EMA_BELOW
 
     # --- Penalties ---
     if in_value_area:
-        score -= 20.0
+        raw += _W_IN_VA
     if vsl is not None and vsl.is_valid and vsl.accepted_below:
-        score -= 20.0
+        raw += _W_ACCEPTED
 
-    return score
+    return max(0.0, min(raw, _MAX_SCORE)) / _MAX_SCORE
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +228,7 @@ def _try_fib_confluence(
     if max(rr1, rr2) < min_rr:
         return None
 
-    score = min(100, max(0, int(round(_score_setup(
+    score = _score_setup(
         current_price=current_price,
         atr=atr,
         vp=vp,
@@ -233,7 +240,7 @@ def _try_fib_confluence(
         in_value_area=in_value_area,
         sweep_at_val=sweep_at_val,
         price_above_ema=price_above_ema,
-    )))))
+    )
 
     vsl_note = (
         f" Structural confluence: swing low at {vsl.swing_low:.2f} aligns with {vsl.volume_type} ({vsl.volume_level:.2f})."
@@ -288,7 +295,7 @@ def _try_swing_volume(
     if max(rr1, rr2) < min_rr:
         return None
 
-    score = min(100, max(0, int(round(_score_setup(
+    score = _score_setup(
         current_price=current_price,
         atr=atr,
         vp=vp,
@@ -300,7 +307,7 @@ def _try_swing_volume(
         in_value_area=in_value_area,
         sweep_at_val=vsl.sweep_detected,
         price_above_ema=price_above_ema,
-    )))))
+    )
 
     sweep_note = " Liquidity sweep below swing low detected — wick and reclaim." if vsl.sweep_detected else ""
     reason = (
@@ -354,7 +361,7 @@ def _try_liquidity_trap(
     if max(rr1, rr2) < min_rr:
         return None
 
-    score = min(100, max(0, int(round(_score_setup(
+    score = _score_setup(
         current_price=current_price,
         atr=atr,
         vp=vp,
@@ -366,7 +373,7 @@ def _try_liquidity_trap(
         in_value_area=in_value_area,
         sweep_at_val=sweep_at_val,
         price_above_ema=price_above_ema,
-    )))))
+    )
 
     reason = (
         f"Price ({current_price:.2f}) swept below VAL ({vp.val:.2f}) near high-volume POC ({vp.poc:.2f}). "
@@ -428,7 +435,7 @@ def _try_vwap_reclaim(
     if max(rr1, rr2) < min_rr:
         return None
 
-    score = min(100, max(0, int(round(_score_setup(
+    score = _score_setup(
         current_price=current_price,
         atr=atr,
         vp=vp,
@@ -441,7 +448,7 @@ def _try_vwap_reclaim(
         in_value_area=in_value_area,
         sweep_at_val=sweep_at_val,
         price_above_ema=price_above_ema,
-    )))))
+    )
 
     reason = (
         f"Price ({current_price:.2f}) reclaiming VWAP ({vwap:.2f}) after trading below it. "

@@ -36,7 +36,7 @@ class VolumeSupportedSwingLow(BaseModel):
 class ScanResult(BaseModel):
     ticker: str
     setup_type: str
-    score: int = Field(ge=0, le=100)
+    score: float = Field(ge=0.0, le=1.0)
     current_price: float
     buy_zone: tuple[float, float]
     stop_loss: float
