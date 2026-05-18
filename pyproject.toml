@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "project-orion"
+version = "0.1.0"
+description = "Swing trade scanner — technical confluence detection only"
+requires-python = ">=3.11"
+dependencies = [
+    "yfinance>=0.2.54",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic>=2.13.0",
+    "httpx>=0.28.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "ruff>=0.9.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

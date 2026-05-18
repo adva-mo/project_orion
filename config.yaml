@@ -1,0 +1,12 @@
+# Project Orion — Scan Configuration
+# Edit this file to set your watchlist and risk settings.
+# These are the defaults; CLI args (--min-rr, explicit tickers) always override.
+
+tickers:
+  - AAPL
+  - MSFT
+  - NVDA
+  - AMZN
+  - TSLA
+
+min_rr: 2.0
