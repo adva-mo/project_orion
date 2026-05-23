@@ -33,6 +33,14 @@ class VolumeSupportedSwingLow(BaseModel):
     accepted_below: bool      # price broke below and stayed below
 
 
+class BreakoutRetestInfo(BaseModel):
+    resistance_level: float
+    resistance_date: str          # YYYY-MM-DD
+    breakout_date: str            # YYYY-MM-DD
+    breakout_volume_ratio: float  # breakout candle vol / 20-day avg vol
+    is_holding: bool              # price >= resistance_level - 0.5 * ATR
+
+
 class ScanResult(BaseModel):
     ticker: str
     setup_type: str
@@ -46,6 +54,7 @@ class ScanResult(BaseModel):
     reason: str
     fibonacci: FibonacciInfo | None = None
     volume_supported_swing_low: VolumeSupportedSwingLow | None = None
+    breakout_retest: BreakoutRetestInfo | None = None
 
 
 class ScanRequest(BaseModel):

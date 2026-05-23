@@ -9,8 +9,10 @@ logger = logging.getLogger(__name__)
 
 DAILY_PERIOD = "6mo"
 HOURLY_PERIOD = "30d"
+WEEKLY_PERIOD = "5y"
 MIN_DAILY_ROWS = 60
 MIN_HOURLY_ROWS = 100
+MIN_WEEKLY_ROWS = 200
 
 
 @dataclass
@@ -18,6 +20,7 @@ class TickerData:
     ticker: str
     daily: pd.DataFrame
     hourly: pd.DataFrame
+    weekly: pd.DataFrame
 
 
 def fetch_ticker(ticker: str) -> TickerData:
@@ -27,7 +30,15 @@ def fetch_ticker(ticker: str) -> TickerData:
     hourly = _fetch_frame(ticker, "1h", HOURLY_PERIOD)
     hourly = _validate_frame(hourly, ticker, "1h", MIN_HOURLY_ROWS)
 
-    return TickerData(ticker=ticker, daily=daily, hourly=hourly)
+    weekly = _fetch_frame(ticker, "1wk", WEEKLY_PERIOD)
+    weekly = _validate_frame(weekly, ticker, "1wk", MIN_WEEKLY_ROWS)
+
+    return TickerData(ticker=ticker, daily=daily, hourly=hourly, weekly=weekly)
+
+
+def fetch_spy_returns(period: str = "3mo") -> "pd.Series":
+    df = _fetch_frame("SPY", "1d", period)
+    return df["Close"].pct_change().dropna()
 
 
 def _fetch_frame(ticker: str, interval: str, period: str) -> pd.DataFrame:

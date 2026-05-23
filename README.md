@@ -6,17 +6,32 @@ Scans a watchlist of US stock tickers and identifies high-probability swing trad
 
 ---
 
+## Strategy Overview
+
+The scanner is built around a **liquidity-first** approach to price action:
+
+1. **Mark** — identify where significant liquidity concentrates (volume nodes, Fibonacci levels, swing lows, value area boundaries)
+2. **Wipe** — detect when price briefly sweeps below a level, triggering stop orders (false breakdown)
+3. **Release** — confirm the sweep was absorbed: price closes back above the level, often on volume
+4. **Entry** — position at the reclaimed level with a defined stop and two targets
+5. **Context** — filter setups against multi-timeframe trend (weekly MA200, daily market structure) and relative strength vs. the broader market
+
+Setups are ranked by a normalized score [0.0 – 1.0] that rewards confluence, sweep confirmation, trend alignment, and R/R quality, and penalizes counter-trend and structurally compromised conditions.
+
+---
+
 ## Setup Types
 
 Evaluated in priority order — first match wins.
 
 | Priority | Setup | Core Condition |
 |---|---|---|
-| 1 | **Fib 61.8 Confluence Buy Zone** | Price inside 61.8% retracement zone + at least one of: POC, VAL, VWAP |
-| 2 | **Swing Low + Volume Support Buy Zone** | Recent pivot low overlaps with POC / VAL / HVN; price near or has swept-and-reclaimed |
-| 3 | **Liquidity Trap Buy Zone** | Price swept below VAL near a high-volume POC (stop-hunt zone) |
-| 4 | **VWAP Reclaim Setup** | Price was below session VWAP, now reclaiming with volume confirmation |
-| 5 | **No Trade** | No clean confluence or poor risk/reward |
+| 1 | **Fib 61.8 Confluence Buy Zone** | Price inside 61.8% retracement zone + at least one of: POC, VAL, VWAP. Bonus when zone was swept below and reclaimed. |
+| 2 | **Breakout + Retest** | Price broke above a prior resistance (swing high) on above-average volume; now retesting that level as support. |
+| 3 | **Swing Low + Volume Support** | Recent pivot low overlaps with POC / VAL / HVN; price near or has swept-and-reclaimed the level. |
+| 4 | **Liquidity Trap** | Price swept below VAL near a high-volume POC (stop-hunt zone). Higher conviction when VAL is subsequently reclaimed. |
+| 5 | **VWAP Reclaim** | Price was below session VWAP, now reclaiming with volume confirmation. |
+| — | **No Trade** | No clean confluence or poor risk/reward. |
 
 ---
 
@@ -26,7 +41,7 @@ Evaluated in priority order — first match wins.
 {
   "ticker": "LMT",
   "setup_type": "Fib 61.8 Confluence Buy Zone",
-  "score": 44,
+  "score": 0.71,
   "current_price": 513.45,
   "buy_zone": [510.00, 519.01],
   "stop_loss": 477.72,
@@ -34,28 +49,13 @@ Evaluated in priority order — first match wins.
   "target_2": 645.31,
   "risk_reward": 4.19,
   "reason": "Price at 61.8% fib retracement (514.51) with confluence at VAL, VWAP...",
-  "fibonacci": {
-    "swing_low": 434.96,
-    "swing_high": 643.20,
-    "fib_382": 563.65,
-    "fib_500": 539.08,
-    "fib_618": 514.51,
-    "fib_786": 479.52,
-    "zone": [510.00, 519.01],
-    "is_near": true
-  },
-  "volume_supported_swing_low": {
-    "swing_low": 630.72,
-    "volume_level": 629.14,
-    "volume_type": "HVN",
-    "distance_atr": 0.09,
-    "is_valid": true,
-    "price_near": false,
-    "sweep_detected": false,
-    "accepted_below": true
-  }
+  "fibonacci": { ... },
+  "volume_supported_swing_low": { ... },
+  "breakout_retest": null
 }
 ```
+
+Score is a normalised value between **0.0** (no confluence) and **1.0** (maximum confluence across all signals).
 
 ---
 
@@ -116,36 +116,33 @@ python -m app scan --json
 **Verbose output example:**
 ```
 ============================================================
-  LMT  —  Fib 61.8 Confluence Buy Zone  (score: 44/100)
+  XLE  —  No Trade  (score: 0.00)
 ============================================================
-  Price      : 513.45
-  ATR (14)   : 18.02
-  VWAP (sess): 510.49  ↑ price above
-  EMA (20)   : 590.42  below EMA (-15)
+  Price      : 59.49
+  ATR (14)   : 1.38
+  VWAP (sess): 59.27  ↑ price above
+  EMA (20)   : 58.62  above EMA (+8)
+  MA200 (wk) : 42.16  above MA200 (+10)
+  Mkt Struct : ranging (0)
+  VP Scenario: price↓ vol↑  -10 (strong decline — avoid)
+  Rel Str/SPY: 1.08×  in-line (0)
 
-  Volume Profile
-    POC      : 626.20
-    VAH      : 645.31
-    VAL      : 507.13  ← price inside value area (-20)
+  Volume Profile  (2026-04-13 – 2026-05-22)
+    POC      : 55.89
+    VAH      : 60.32
+    VAL      : 53.87  ← price inside value area (-20)
 
-  Fibonacci  : swing 434.96 → 643.20  (range 208.24)
-    38.2%    : 563.65
-    50.0%    : 539.08
-    61.8%    : 514.51  ← zone 510.00 – 519.01  ✓ PRICE IN ZONE
-    78.6%    : 479.52
+  Fibonacci  : swing 53.41 (2026-04-17) → 59.84 (2026-04-30)  (range 6.43)
+    38.2%    : 57.38
+    50.0%    : 56.62
+    61.8%    : 55.87  ← zone 55.52 – 56.21  ✗ price outside zone
+    78.6%    : 54.79
 
   Swing Low + Volume Confluence
-    Swing low: 630.72  ←→  HVN 629.14  (dist 0.09 ATR)
-    Flags    :  ✗ accepted below (-20)
+    Swing low: 53.77 (2026-02-26)  ←→  VAL 53.87  (dist 0.07 ATR)
+    Flags    :
 
-  Setup
-    Buy zone : 510.00 – 519.01
-    Stop     : 477.72  (32.28 risk from zone low)
-    Target 1 : 510.49
-    Target 2 : 645.31
-    R/R      : 4.19x
-
-  Reason: Price at 61.8% fib retracement (514.51)...
+  Reason: No clean technical setup detected. Price in middle of value area or poor risk/reward.
 ```
 
 ### API
@@ -180,78 +177,125 @@ docker run --rm -p 8000:8000 -v $(pwd)/config.yaml:/app/config.yaml \
   project-orion uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Mount your own `config.yaml` to customize the watchlist without rebuilding the image.
-
 ---
 
 ## How It Works
 
 ### Data
-- **Daily OHLCV** — 6 months lookback via yfinance (swing detection, ATR, EMA, Fibonacci)
-- **Hourly OHLCV** — 30 days lookback (session VWAP, volume profile, sweep detection)
+
+| Timeframe | Window | Used For |
+|---|---|---|
+| Daily (1d) | 6 months | ATR, EMA, Fibonacci, swing detection, market structure |
+| Hourly (1h) | 30 days | Session VWAP, volume profile, sweep detection (hourly) |
+| Weekly (1wk) | 5 years | MA200 — bull/bear market context |
+| Daily SPY | 3 months | Relative strength calculation |
+
+Weekly data and SPY are fetched alongside each ticker scan. SPY is fetched once per batch run to avoid redundant requests.
+
+---
 
 ### Indicators
 
-**ATR** — Wilder's 14-period ATR on daily data. Used for zone sizing, stop placement, and all confluence tolerances.
+**ATR (14-period)** — Wilder's ATR on daily data. Used for zone sizing, stop placement, and all proximity tolerances throughout the scanner.
 
-**Session VWAP** — True VWAP that resets at the start of each trading day: `cumulative(TP × Volume) / cumulative(Volume)` where `TP = (H+L+C)/3`. Reflects the actual institutional reference level.
+**Session VWAP** — True VWAP that resets at the start of each trading day: `Σ(TP × Volume) / Σ(Volume)` where `TP = (H+L+C)/3`. Reflects the intraday institutional reference level.
 
-**EMA (20)** — 20-period EMA on daily closes. Used as a trend filter: +10 pts if price is above, −15 pts if price is below. Avoids buying into strong downtrends.
+**EMA (20-period)** — 20-period EMA on daily closes. Short-term trend filter. Bonus when price is above; penalty when below.
+
+**MA200 Weekly** — 200-period simple moving average on weekly closes. Determines the primary bull/bear market regime. A strong bonus for price above (institutional buying zone) and a significant penalty below (structural headwind for long setups).
 
 **Volume Profile** — Hourly close prices binned into 50 equal-width buckets over the 30-day window:
-- **POC** — Price of Control: midpoint of the bin with highest volume
-- **VAH / VAL** — Value Area High/Low: outer boundaries of bins containing 70% of total volume
-- **HVN** — High-Volume Nodes: up to 3 secondary bins with volume ≥ 60% of POC
+- **POC** (Point of Control) — midpoint of the bin with the highest cumulative volume
+- **VAH / VAL** (Value Area High/Low) — outer boundaries of bins that together contain 70% of total volume
+- **HVN** (High-Volume Nodes) — up to 3 secondary bins with volume ≥ 60% of POC, filtered to exclude nodes too close to POC
 
-**Fibonacci** — Objective, data-driven swing detection:
-1. Pivot highs/lows: candle must be strictly higher/lower than the 5 candles on each side (numpy-based, no rolling window bias)
-2. Valid bullish impulse: `swing_low → swing_high` where move ≥ 2× ATR and low occurs before high
-3. Ranked by recency (60%) and size (40%) — top 2 impulses evaluated
-4. Price is considered "near 61.8%" if it falls inside the zone of **either** top impulse
-5. Levels: 38.2%, 50%, 61.8%, 78.6%
-6. Zone: `fib_618 ± 0.25 × ATR`
+**Fibonacci Retracement** — Objective, data-driven impulse detection:
+1. Pivot highs/lows: a candle must be strictly higher/lower than the 5 candles on each side
+2. Valid bullish impulse: `swing_low → swing_high` where move ≥ 2× ATR
+3. Ranked by recency (60%) + magnitude (40%) — top 2 impulses evaluated
+4. Levels: 38.2%, 50%, 61.8%, 78.6% retracements
+5. Zone: `61.8% ± 0.25 × ATR`
+6. **Sweep detection**: the zone is checked for a prior wick-below + close-above pattern on both hourly and daily bars. A swept-and-reclaimed zone scores significantly higher than simple proximity — this is the preferred entry signal.
 
-**Swing Low + Volume Confluence** — Detects support zones where price structure and volume align:
+**Swing Low + Volume Confluence** — Structural support zones where price pivots and volume align:
 1. Takes the 3 most recent pivot lows from valid impulse structures
-2. Checks each against POC, VAL, and HVN within 0.25 × ATR tolerance
-3. Returns the most recent match (POC checked first, then VAL, then HVN)
-4. Detects sweep: hourly candle wicked below the swing low but closed back above
-5. Detects breakdown: price currently below swing low with no reclaim
+2. Matches each against POC, VAL, then HVN (within 0.25 × ATR tolerance)
+3. Flags: `price_near` (within 0.3 × ATR), `sweep_detected` (wick below + close above, on hourly or daily bars), `accepted_below` (price broke below and has not reclaimed)
 
-### Risk Logic
+**Market Structure** — Analyses the sequence of recent daily pivot highs and lows:
+- `uptrend` — higher highs and higher lows (HH + HL)
+- `downtrend` — lower highs and lower lows (LH + LL)
+- `ranging` — mixed sequence
+
+**Volume-Price Scenario** — Classifies the last 5 daily bars vs. the prior 5 into one of four states:
+
+| Scenario | Interpretation | Score Impact |
+|---|---|---|
+| Price↑ Volume↑ | Strong trend — institutional participation | +8 |
+| Price↑ Volume↓ | Weak upside — potential false breakout | 0 |
+| Price↓ Volume↓ | Fading decline — selling pressure waning | +8 |
+| Price↓ Volume↑ | Strong decline — institutional selling | −10 |
+
+**Relative Strength vs. SPY** — Compares the ticker's 20-day return to SPY's over the same window. `RS > 1.3` indicates a stock outperforming the broader market (institutional accumulation signal). `RS < 0.7` flags significant underperformance.
+
+---
+
+### Sweep Detection Logic
+
+Sweeps (false breakdowns) are detected identically on both hourly and daily bars: a candle's **low** pierces below the support level while the **close** is back above it. A sweep confirmed on daily bars earns an additional bonus over an hourly-only sweep, as the higher-timeframe signal carries more weight.
+
+---
+
+### Risk Parameters
 
 | Field | Source |
 |---|---|
-| Entry | Lower bound of buy zone (aggressive limit) |
+| Entry | Lower bound of buy zone (aggressive limit order) |
 | Stop loss | Below fib 78.6%, below sweep low, or below swing low (setup-dependent) |
-| Target 1 | Session VWAP or 50% fib retracement (whichever is above entry) |
+| Target 1 | Session VWAP, fib 50%, or 1:1 extension above resistance (setup-dependent) |
 | Target 2 | VAH or recent swing high |
 | R/R | `max((T1 − entry), (T2 − entry)) / (entry − stop)` — uses the better target |
 
-### Scoring (0–100)
+---
 
-**Base score (all setups)**
+### Scoring System
 
-| Component | Points |
+Score is normalized to **[0.0, 1.0]** by dividing the raw signal sum by the theoretical maximum (248 points). Penalties can push raw scores negative — these are clamped to 0.0 before normalization.
+
+**Positive signals (add to raw score)**
+
+| Signal | Points |
 |---|---|
-| Confluence count (POC, VAL, VWAP) | 10 pts each, max 40 |
-| Proximity to 61.8% fib | 0–20 pts (linear, 0 at 1× ATR away) |
-| R/R ratio | 0–25 pts (linear, 10 pts at 2×, 25 pts at 4×) |
-| Volume confirmation | +15 |
-| Price above 20 EMA | +10 |
-| Price below 20 EMA | −15 |
-| Price inside value area | −20 |
-| VAL sweep candle (wick below, close above) | +15 |
+| Sweep-and-reclaim (hourly) | +30 |
+| POC confluence | +25 |
+| Fib 61.8% proximity (linear, 0 at 1× ATR) | 0 – 20 |
+| Fib OTE zone swept + reclaimed | +20 |
+| R/R quality (linear, 2× → 4×) | 0 – 20 |
+| VAL reclaim after sweep | +15 |
+| Breakout candle volume ≥ 1.5× avg | +15 |
+| Market structure: uptrend (HH+HL) | +12 |
+| VAL confluence | +12 |
+| Volume confirmation (VWAP reclaim setup) | +12 |
+| MA200 weekly — price above | +10 |
+| Relative strength vs. SPY > 1.3× | +10 |
+| Swing low proximity | +10 |
+| Volume-price scenario bonus (↑↑ or ↓↓) | +8 |
+| HVN confluence | +8 |
+| VWAP proximity | +8 |
+| EMA 20 — price above | +8 |
+| Daily timeframe sweep bonus | +5 |
 
-**Swing Low + Volume Confluence bonus (added on top)**
+**Penalties (subtract from raw score)**
 
 | Condition | Points |
 |---|---|
-| Swing low overlaps with POC | +20 |
-| Swing low overlaps with VAL or HVN | +15 |
-| Current price near swing low (≤ 0.5× ATR) | +10 |
-| Sweep-and-reclaim detected at swing low | +10 |
-| Price accepted below swing low (breakdown) | −20 |
+| MA200 weekly — price below | −25 |
+| Market structure: downtrend (LH+LL) | −20 |
+| Price inside value area | −20 |
+| Price accepted below swing low | −20 |
+| EMA 20 — price below | −15 |
+| Volume-price scenario: price↓ vol↑ | −10 |
+| Relative strength vs. SPY < 0.7× | −8 |
 
 ---
 
@@ -261,13 +305,15 @@ Mount your own `config.yaml` to customize the watchlist without rebuilding the i
 app/
 ├── __main__.py     CLI entrypoint
 ├── main.py         FastAPI app
-├── models.py       Pydantic types (FibonacciInfo, VolumeProfile, VolumeSupportedSwingLow, ScanResult)
+├── models.py       Pydantic types (FibonacciInfo, VolumeProfile, VolumeSupportedSwingLow,
+│                                   BreakoutRetestInfo, ScanResult)
 ├── config.py       config.yaml loader
-├── scanner.py      Orchestrator
-├── data.py         yfinance fetch + validation
-├── indicators.py   ATR, session VWAP, EMA, volume profile (POC/VAH/VAL/HVN)
+├── scanner.py      Orchestrator — wires all indicators and routes to setups
+├── data.py         yfinance fetch + validation (daily, hourly, weekly, SPY)
+├── indicators.py   ATR, session VWAP, EMA20, MA200 weekly, volume profile,
+│                   market structure, volume-price scenario, relative strength
 ├── fibonacci.py    Pivot detection, impulse ranking, fib levels, swing-low confluence
-└── setups.py       Setup detection + scoring
+└── setups.py       Setup detection + unified scoring
 config.yaml         Watchlist and settings
 Dockerfile          Multi-stage Docker build
 ```
