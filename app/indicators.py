@@ -91,6 +91,72 @@ def compute_volume_profile(hourly: pd.DataFrame, n_buckets: int = 50) -> VolumeP
     return VolumeProfile(poc=poc, vah=vah, val=val, hvn=hvn)
 
 
+def classify_volume_price_scenario(daily: pd.DataFrame, n_bars: int = 5) -> str:
+    """CIIDB 4-scenario classifier based on last n_bars vs prior n_bars."""
+    if len(daily) < n_bars * 2:
+        return "price_down_vol_up"  # neutral/conservative default
+    recent = daily.iloc[-n_bars:]
+    prior = daily.iloc[-(n_bars * 2):-n_bars]
+    price_up = float(recent["Close"].iloc[-1]) > float(recent["Close"].iloc[0])
+    vol_up = float(recent["Volume"].mean()) > float(prior["Volume"].mean())
+    if price_up and vol_up:
+        return "price_up_vol_up"
+    if price_up and not vol_up:
+        return "price_up_vol_down"
+    if not price_up and not vol_up:
+        return "price_down_vol_down"
+    return "price_down_vol_up"
+
+
+def compute_market_structure(daily: pd.DataFrame, n_pivots: int = 5) -> str:
+    """Returns 'uptrend', 'downtrend', or 'ranging' based on recent daily pivot sequence."""
+    from app.fibonacci import find_pivot_highs, find_pivot_lows
+
+    ph = find_pivot_highs(daily, n_pivots)
+    pl = find_pivot_lows(daily, n_pivots)
+
+    high_vals = daily["High"][ph].values
+    low_vals = daily["Low"][pl].values
+
+    if len(high_vals) < 2 or len(low_vals) < 2:
+        return "ranging"
+
+    hh = high_vals[-1] > high_vals[-2]
+    hl = low_vals[-1] > low_vals[-2]
+    lh = high_vals[-1] < high_vals[-2]
+    ll = low_vals[-1] < low_vals[-2]
+
+    if hh and hl:
+        return "uptrend"
+    if lh and ll:
+        return "downtrend"
+    return "ranging"
+
+
+def compute_relative_strength(
+    ticker_daily: pd.DataFrame,
+    spy_returns: "pd.Series",
+    n_days: int = 20,
+) -> float:
+    """Returns ticker 20-day return / SPY 20-day return. >1.0 = outperforming."""
+    if len(ticker_daily) < n_days or len(spy_returns) == 0:
+        return 1.0
+    ticker_ret = float(ticker_daily["Close"].iloc[-1] / ticker_daily["Close"].iloc[-n_days] - 1)
+    common = spy_returns.index.intersection(ticker_daily.index[-n_days:])
+    if len(common) == 0:
+        return 1.0
+    spy_ret = float((1 + spy_returns.loc[common]).prod() - 1)
+    if spy_ret == 0:
+        return 1.0
+    return ticker_ret / spy_ret
+
+
+def compute_ma200_weekly(weekly: pd.DataFrame) -> float:
+    if len(weekly) < 200:
+        raise ValueError(f"Need at least 200 weekly rows for MA200, got {len(weekly)}")
+    return float(weekly["Close"].rolling(200).mean().iloc[-1])
+
+
 def filter_hvn(vp: VolumeProfile, atr: float) -> VolumeProfile:
     """Remove HVN entries within 0.2 × ATR of POC (they are not distinct nodes)."""
     filtered = [h for h in vp.hvn if abs(h - vp.poc) > 0.2 * atr]

@@ -150,6 +150,7 @@ def detect_swing_low_confluence(
     hourly_closes: pd.Series,
     pivot_n: int = 5,
     n_recent: int = 3,
+    daily_sweep_lookback: int = 10,
 ) -> VolumeSupportedSwingLow | None:
     """
     Returns a VolumeSupportedSwingLow when a recent pivot low from a valid
@@ -196,11 +197,18 @@ def detect_swing_low_confluence(
 
     price_near = abs(current_price - swing_low) <= 0.3 * atr
 
-    # Sweep: any recent hourly candle wicked below swing_low but closed back above
-    sweep_detected = any(
+    # Sweep: hourly candle wicked below swing_low but closed back above
+    sweep_hourly = any(
         float(hourly_lows.iloc[i]) < swing_low and float(hourly_closes.iloc[i]) > swing_low
         for i in range(len(hourly_lows))
     )
+    # Also check daily bars (higher timeframe confirmation)
+    daily_start = max(0, len(daily) - daily_sweep_lookback)
+    sweep_daily = any(
+        float(daily["Low"].iloc[i]) < swing_low and float(daily["Close"].iloc[i]) > swing_low
+        for i in range(daily_start, len(daily))
+    )
+    sweep_detected = sweep_hourly or sweep_daily
 
     # Accepted below: price is clearly below swing_low with no reclaim
     accepted_below = (current_price < swing_low - 0.1 * atr) and not sweep_detected
