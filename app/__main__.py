@@ -11,10 +11,14 @@ import argparse
 import json
 import sys
 
+WHITE = "\033[97m"
+RED = "\033[91m"
+GREEN = "\033[92m"
+RESET = "\033[0m"
+
 from app.config import load_config
 from app.models import ScanResult
 from app.scanner import ScanDetail, scan_tickers
-from app.setups import SETUP_BREAKOUT_RETEST
 
 
 def main() -> None:
@@ -39,7 +43,8 @@ def main() -> None:
             print("Error: no tickers provided and config.yaml is empty.", file=sys.stderr)
             sys.exit(1)
 
-        print(f"Scanning {len(tickers)} ticker(s): {', '.join(tickers)}  |  min_rr={min_rr}", file=sys.stderr)
+        print("TODAY'S SCAN", file=sys.stderr)
+        print(f"Scanning {len(tickers)} ticker(s)  |  min_rr={min_rr}", file=sys.stderr)
         results, errors, details = scan_tickers(tickers, min_rr=min_rr)
 
         if args.json:
@@ -55,7 +60,8 @@ def main() -> None:
 
 
 def _print_verbose(details: list[ScanDetail], errors: dict[str, str]) -> None:
-    for d in details:
+    sorted_details = sorted(details, key=lambda d: (d.result.setup_type == "No Trade", -d.result.score))
+    for d in sorted_details:
         r = d.result
         vp = d.volume_profile
         fib = r.fibonacci
@@ -134,10 +140,10 @@ def _print_verbose(details: list[ScanDetail], errors: dict[str, str]) -> None:
 
         if r.setup_type != "No Trade":
             print(f"  Setup")
-            print(f"    Buy zone : {r.buy_zone[0]:.2f} – {r.buy_zone[1]:.2f}")
-            print(f"    Stop     : {r.stop_loss:.2f}  ({r.buy_zone[0] - r.stop_loss:.2f} risk from zone low)")
-            print(f"    Target 1 : {r.target_1:.2f}")
-            print(f"    Target 2 : {r.target_2:.2f}")
+            print(f"    Buy zone : {WHITE}{r.buy_zone[0]:.2f} – {r.buy_zone[1]:.2f}{RESET}")
+            print(f"    Stop     : {RED}{r.stop_loss:.2f}{RESET}  ({r.buy_zone[0] - r.stop_loss:.2f} risk from zone low)")
+            print(f"    Target 1 : {GREEN}{r.target_1:.2f}{RESET}")
+            print(f"    Target 2 : {GREEN}{r.target_2:.2f}{RESET}")
             print(f"    R/R      : {r.risk_reward:.2f}x")
             print()
 
@@ -151,45 +157,32 @@ def _print_verbose(details: list[ScanDetail], errors: dict[str, str]) -> None:
 
 
 def _print_table(results: list[ScanResult], errors: dict[str, str]) -> None:
-    col_w = [6, 32, 5, 10, 18, 10, 10, 10, 5]
-    header = (
-        f"{'TICKER':<{col_w[0]}}  "
-        f"{'SETUP':<{col_w[1]}}  "
-        f"{'SCR':>{col_w[2]}}  "
-        f"{'PRICE':>{col_w[3]}}  "
-        f"{'BUY ZONE':^{col_w[4]}}  "
-        f"{'STOP':>{col_w[5]}}  "
-        f"{'T1':>{col_w[6]}}  "
-        f"{'T2':>{col_w[7]}}  "
-        f"{'RR':>{col_w[8]}}"
-    )
-    sep = "-" * len(header)
-    print(sep)
-    print(header)
-    print(sep)
+    sorted_results = sorted(results, key=lambda r: (r.setup_type == "No Trade", -r.score))
+    trades = [r for r in sorted_results if r.setup_type != "No Trade"]
+    no_trades = [r for r in sorted_results if r.setup_type == "No Trade"]
 
-    for r in results:
-        buy_zone_str = f"{r.buy_zone[0]:.2f} – {r.buy_zone[1]:.2f}" if r.setup_type != "No Trade" else "—"
-        stop_str = f"{r.stop_loss:.2f}" if r.setup_type != "No Trade" else "—"
-        t1_str = f"{r.target_1:.2f}" if r.setup_type != "No Trade" else "—"
-        t2_str = f"{r.target_2:.2f}" if r.setup_type != "No Trade" else "—"
-        rr_str = f"{r.risk_reward:.1f}x" if r.setup_type != "No Trade" else "—"
+    sep = "─" * 40
 
-        print(
-            f"{r.ticker:<{col_w[0]}}  "
-            f"{r.setup_type:<{col_w[1]}}  "
-            f"{r.score:>{col_w[2]}.2f}  "
-            f"{r.current_price:>{col_w[3]}.2f}  "
-            f"{buy_zone_str:^{col_w[4]}}  "
-            f"{stop_str:>{col_w[5]}}  "
-            f"{t1_str:>{col_w[6]}}  "
-            f"{t2_str:>{col_w[7]}}  "
-            f"{rr_str:>{col_w[8]}}"
-        )
-        print(f"  → {r.reason}")
+    if trades:
+        for i, r in enumerate(trades):
+            if i > 0:
+                print(sep)
+            print(f"{r.ticker}  (score: {r.score:.2f})")
+            print(f"Setup:    {r.setup_type}")
+            print(f"Price:    {r.current_price:.2f}")
+            print(f"Buy Zone: {WHITE}{r.buy_zone[0]:.2f} – {r.buy_zone[1]:.2f}{RESET}")
+            print(f"Stop:     {RED}{r.stop_loss:.2f}{RESET}")
+            print(f"Target:   {GREEN}{r.target_1:.2f} / {r.target_2:.2f}{RESET}")
+            print(f"RR:       {r.risk_reward:.1f}x")
+            print()
+
+    if no_trades:
+        print(sep)
+        print("No Trade")
+        print(sep)
+        for r in no_trades:
+            print(f"  {r.ticker:<6}  {r.reason}")
         print()
-
-    print(sep)
 
     if errors:
         print("\nSkipped (data errors):", file=sys.stderr)
